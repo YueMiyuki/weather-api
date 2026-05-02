@@ -3,6 +3,7 @@
 A modern, production-ready template for building full-stack React applications using React Router.
 
 [![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FYueMiyuki%2Fweather-api&project-name=weather-api&repository-name=weather-api)
 
 ## Features
 
