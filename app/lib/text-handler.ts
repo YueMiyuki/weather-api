@@ -36,7 +36,7 @@ export async function handleTextRequest(
 	}
 
 	const ip = getClientIp(request);
-	const rl = checkRateLimit(ip);
+	const rl = await checkRateLimit(ip);
 	const headers: Record<string, string> = {
 		"Content-Type": "text/plain; charset=utf-8",
 		"Cache-Control": "public, max-age=300",
@@ -51,7 +51,7 @@ export async function handleTextRequest(
 		);
 	}
 
-	bumpRequestsToday();
+	await bumpRequestsToday();
 	const opts = parseOptions(
 		url.searchParams,
 		request.headers.get("accept-language"),

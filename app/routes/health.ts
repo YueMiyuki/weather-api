@@ -6,8 +6,16 @@ import { humanizeUptime, startedAt, uptimeMs } from "@/lib/uptime";
 
 export async function loader({ request }: Route.LoaderArgs) {
 	const ip = getClientIp(request);
-	const rl = peekRateLimit(ip);
 	const ms = uptimeMs();
+
+	const [rl, requestsToday, cacheHits, cacheMisses, lastLatencyMs] =
+		await Promise.all([
+			peekRateLimit(ip),
+			getRequestsToday(),
+			getStat("cache_hits"),
+			getStat("cache_misses"),
+			getStat("last_upstream_ms"),
+		]);
 
 	const body = {
 		status: "ok",
@@ -28,13 +36,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 				resetAt: new Date(rl.dayResetAt).toISOString(),
 			},
 		},
-		requestsToday: getRequestsToday(),
+		requestsToday,
 		cache: {
-			hits: getStat("cache_hits"),
-			misses: getStat("cache_misses"),
+			hits: cacheHits,
+			misses: cacheMisses,
 		},
 		upstream: {
-			lastLatencyMs: getStat("last_upstream_ms"),
+			lastLatencyMs,
 		},
 	};
 

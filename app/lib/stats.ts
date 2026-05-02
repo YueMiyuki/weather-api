@@ -1,36 +1,27 @@
-import { db } from "./db";
+import { redis } from "./redis";
 
-const incrementStmt = db.prepare(`
-  INSERT INTO stats (key, value) VALUES (?, ?)
-  ON CONFLICT(key) DO UPDATE SET value = value + excluded.value
-`);
+const STAT_PREFIX = "stat:";
 
-const setStmt = db.prepare(`
-  INSERT INTO stats (key, value) VALUES (?, ?)
-  ON CONFLICT(key) DO UPDATE SET value = excluded.value
-`);
-
-const getStmt = db.prepare(`SELECT value FROM stats WHERE key = ?`);
-
-export function bumpStat(key: string, by = 1): void {
-	incrementStmt.run(key, by);
+export async function bumpStat(key: string, by = 1): Promise<void> {
+	await redis.incrby(`${STAT_PREFIX}${key}`, by);
 }
 
-export function setStat(key: string, value: number): void {
-	setStmt.run(key, value);
+export async function setStat(key: string, value: number): Promise<void> {
+	await redis.set(`${STAT_PREFIX}${key}`, value);
 }
 
-export function getStat(key: string): number {
-	const row = getStmt.get(key) as { value: number } | undefined;
-	return row?.value ?? 0;
+export async function getStat(key: string): Promise<number> {
+	const v = await redis.get<number | string | null>(`${STAT_PREFIX}${key}`);
+	if (v === null || v === undefined) return 0;
+	return typeof v === "number" ? v : Number(v) || 0;
 }
 
-export function getRequestsToday(): number {
+export async function getRequestsToday(): Promise<number> {
 	const day = Math.floor(Date.now() / 86_400_000);
 	return getStat(`requests_day_${day}`);
 }
 
-export function bumpRequestsToday(): void {
+export async function bumpRequestsToday(): Promise<void> {
 	const day = Math.floor(Date.now() / 86_400_000);
-	bumpStat(`requests_day_${day}`);
+	await bumpStat(`requests_day_${day}`);
 }

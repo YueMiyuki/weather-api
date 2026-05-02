@@ -17,6 +17,21 @@ A modern, production-ready template for building full-stack React applications u
 
 ## Getting Started
 
+### Storage (Upstash Redis)
+
+This project uses Upstash Redis (HTTP) for cache, rate limiting, and stats —
+ideal for serverless platforms like Vercel.
+
+1. Create a Redis database at [upstash.com](https://upstash.com/) (or via the
+   Vercel Marketplace integration).
+2. Set the following environment variables (the Vercel integration sets them
+   for you automatically):
+
+```bash
+export UPSTASH_REDIS_REST_URL="https://<your-db>.upstash.io"
+export UPSTASH_REDIS_REST_TOKEN="<token>"
+```
+
 ### Installation
 
 Install the dependencies:

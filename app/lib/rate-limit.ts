@@ -1,30 +1,44 @@
-import { db } from "./db";
+import { redis } from "./redis";
 
 export const MINUTE_LIMIT = 60;
 export const DAY_LIMIT = 2000;
 
-const upsertStmt = db.prepare(`
-  INSERT INTO rate_limit (ip, window, bucket, count) VALUES (?, ?, ?, 1)
-  ON CONFLICT(ip, window, bucket) DO UPDATE SET count = count + 1
-  RETURNING count
-`);
+const RL_PREFIX = "rl:";
 
-const peekStmt = db.prepare(
-	`SELECT count FROM rate_limit WHERE ip = ? AND window = ? AND bucket = ?`,
-);
+function bucketKey(
+	ip: string,
+	windowKind: "minute" | "day",
+	bucket: number,
+): string {
+	return `${RL_PREFIX}${windowKind}:${ip}:${bucket}`;
+}
 
-const cleanupStmt = db.prepare(
-	`DELETE FROM rate_limit WHERE (window = 'minute' AND bucket < ?) OR (window = 'day' AND bucket < ?)`,
-);
+async function bumpBucket(
+	ip: string,
+	windowKind: "minute" | "day",
+	bucket: number,
+	ttlSec: number,
+): Promise<number> {
+	const key = bucketKey(ip, windowKind, bucket);
+	// Pipeline INCR + EXPIRE in a single round-trip. EXPIRE on every call is
+	// safe and idempotent; Redis just resets the TTL to the same value.
+	const p = redis.pipeline();
+	p.incr(key);
+	p.expire(key, ttlSec);
+	const [count] = (await p.exec()) as [number, number];
+	return count;
+}
 
-let lastCleanup = 0;
-function maybeCleanup() {
-	const now = Date.now();
-	if (now - lastCleanup < 60_000) return;
-	lastCleanup = now;
-	const minuteBucket = Math.floor(now / 60_000) - 5;
-	const dayBucket = Math.floor(now / 86_400_000) - 2;
-	cleanupStmt.run(minuteBucket, dayBucket);
+async function peekBucket(
+	ip: string,
+	windowKind: "minute" | "day",
+	bucket: number,
+): Promise<number> {
+	const v = await redis.get<number | string | null>(
+		bucketKey(ip, windowKind, bucket),
+	);
+	if (v === null || v === undefined) return 0;
+	return typeof v === "number" ? v : Number(v) || 0;
 }
 
 export interface RateLimitState {
@@ -36,19 +50,16 @@ export interface RateLimitState {
 	retryAfterSec: number;
 }
 
-export function checkRateLimit(ip: string): RateLimitState {
-	maybeCleanup();
+export async function checkRateLimit(ip: string): Promise<RateLimitState> {
 	const now = Date.now();
 	const minuteBucket = Math.floor(now / 60_000);
 	const dayBucket = Math.floor(now / 86_400_000);
 
-	const minuteRow = upsertStmt.get(ip, "minute", minuteBucket) as {
-		count: number;
-	};
-	const dayRow = upsertStmt.get(ip, "day", dayBucket) as { count: number };
-
-	const minuteCount = minuteRow.count;
-	const dayCount = dayRow.count;
+	const [minuteCount, dayCount] = await Promise.all([
+		// Give buckets a small safety margin past their natural reset.
+		bumpBucket(ip, "minute", minuteBucket, 120),
+		bumpBucket(ip, "day", dayBucket, 86_400 + 60),
+	]);
 
 	const minuteResetAt = (minuteBucket + 1) * 60_000;
 	const dayResetAt = (dayBucket + 1) * 86_400_000;
@@ -75,18 +86,14 @@ export function checkRateLimit(ip: string): RateLimitState {
 	};
 }
 
-export function peekRateLimit(ip: string): RateLimitState {
+export async function peekRateLimit(ip: string): Promise<RateLimitState> {
 	const now = Date.now();
 	const minuteBucket = Math.floor(now / 60_000);
 	const dayBucket = Math.floor(now / 86_400_000);
-	const minuteRow = peekStmt.get(ip, "minute", minuteBucket) as
-		| { count: number }
-		| undefined;
-	const dayRow = peekStmt.get(ip, "day", dayBucket) as
-		| { count: number }
-		| undefined;
-	const minuteCount = minuteRow?.count ?? 0;
-	const dayCount = dayRow?.count ?? 0;
+	const [minuteCount, dayCount] = await Promise.all([
+		peekBucket(ip, "minute", minuteBucket),
+		peekBucket(ip, "day", dayBucket),
+	]);
 	return {
 		allowed: minuteCount <= MINUTE_LIMIT && dayCount <= DAY_LIMIT,
 		minuteRemaining: Math.max(0, MINUTE_LIMIT - minuteCount),

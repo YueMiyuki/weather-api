@@ -20,7 +20,7 @@ const HEIGHT = 750;
 export async function loader({ request }: Route.LoaderArgs) {
 	const url = new URL(request.url);
 	const ip = getClientIp(request);
-	const rl = checkRateLimit(ip);
+	const rl = await checkRateLimit(ip);
 	const rlHeaders = rateLimitHeaders(rl) as Record<string, string>;
 
 	if (!rl.allowed) {
@@ -37,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 		);
 	}
 
-	bumpRequestsToday();
+	await bumpRequestsToday();
 
 	const opts = parseOptions(
 		url.searchParams,

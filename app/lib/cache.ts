@@ -1,32 +1,26 @@
-import { db } from "./db";
+import { redis } from "./redis";
 import { bumpStat } from "./stats";
 
-const getStmt = db.prepare(`SELECT value, expires_at FROM cache WHERE key = ?`);
-const setStmt = db.prepare(
-	`INSERT INTO cache (key, value, expires_at) VALUES (?, ?, ?)
-   ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at`,
-);
-const deleteStmt = db.prepare(`DELETE FROM cache WHERE key = ?`);
+const CACHE_PREFIX = "cache:";
 
-export function cacheGet<T>(key: string): T | null {
-	const row = getStmt.get(key) as
-		| { value: string; expires_at: number }
-		| undefined;
-	if (!row) {
-		bumpStat("cache_misses");
+export async function cacheGet<T>(key: string): Promise<T | null> {
+	// Upstash auto-deserializes JSON values stored via the SDK.
+	const value = await redis.get<T>(`${CACHE_PREFIX}${key}`);
+	if (value === null || value === undefined) {
+		await bumpStat("cache_misses");
 		return null;
 	}
-	if (row.expires_at < Date.now()) {
-		deleteStmt.run(key);
-		bumpStat("cache_misses");
-		return null;
-	}
-	bumpStat("cache_hits");
-	return JSON.parse(row.value) as T;
+	await bumpStat("cache_hits");
+	return value;
 }
 
-export function cacheSet(key: string, value: unknown, ttlMs: number): void {
-	setStmt.run(key, JSON.stringify(value), Date.now() + ttlMs);
+export async function cacheSet(
+	key: string,
+	value: unknown,
+	ttlMs: number,
+): Promise<void> {
+	const ttlSec = Math.max(1, Math.ceil(ttlMs / 1000));
+	await redis.set(`${CACHE_PREFIX}${key}`, value, { ex: ttlSec });
 }
 
 export async function cached<T>(
@@ -34,9 +28,9 @@ export async function cached<T>(
 	ttlMs: number,
 	loader: () => Promise<T>,
 ): Promise<T> {
-	const hit = cacheGet<T>(key);
+	const hit = await cacheGet<T>(key);
 	if (hit !== null) return hit;
 	const value = await loader();
-	cacheSet(key, value, ttlMs);
+	await cacheSet(key, value, ttlMs);
 	return value;
 }

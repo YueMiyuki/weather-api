@@ -71,7 +71,7 @@ async function timed<T>(fn: () => Promise<T>): Promise<T> {
 	try {
 		return await fn();
 	} finally {
-		setStat("last_upstream_ms", Date.now() - start);
+		void setStat("last_upstream_ms", Date.now() - start);
 	}
 }
 
